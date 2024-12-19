@@ -1,50 +1,58 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"slices"
+)
 
 type color string
 
 const (
-	colorRed  = "\033[0;31m"
-	colorNone = "\033[0m"
+	colorRed      = "\033[0;7m"
+	colorYellow   = "\033[0;33m"
+	colorNormal   = "\033[0m"
+	colorSelected = "\033[0;5;31m"
 )
 
 type gameState struct {
-	pieces   [8][8]Field
-	moves    []AbsoluteMove
-	selected *Coordinate
+	gameboard [8][8]Field
+	moves     []AbsoluteMove
 }
 
 func getDefaultBoard() *gameState {
 	return &gameState{
 		[8][8]Field{
-			{{Rook, true}, {Bishop, true}, {Knight, true}, {Queen, true}, {King, true}, {Knight, true}, {Bishop, true}, {Rook, true}},
+			{{Rook, true}, {Knight, true}, {Bishop, true}, {Queen, true}, {King, true}, {Bishop, true}, {Knight, true}, {Rook, true}},
 			{{Pawn, true}, {Pawn, true}, {Pawn, true}, {Pawn, true}, {Pawn, true}, {Pawn, true}, {Pawn, true}, {Pawn, true}},
 			{},
 			{},
 			{},
 			{},
 			{{Pawn, false}, {Pawn, false}, {Pawn, false}, {Pawn, false}, {Pawn, false}, {Pawn, false}, {Pawn, false}, {Pawn, false}},
-			{{Rook, false}, {Bishop, false}, {Knight, false}, {Queen, false}, {King, false}, {Knight, false}, {Bishop, false}, {Rook, false}},
+			{{Rook, false}, {Knight, false}, {Bishop, false}, {Queen, false}, {King, false}, {Bishop, false}, {Knight, false}, {Rook, false}},
 		},
 		[]AbsoluteMove{},
-		nil,
 	}
 }
 
-func printBoard(state *gameState) {
-	for i := int8(0); i < 8; i++ {
-		for j := int8(0); j < 8; j++ {
-			if state.selected != nil && state.selected.y == i && state.selected.x == j {
-				fmt.Print(colorRed)
+func printBoard(state *gameState, selected []Coordinate, highlighted []Coordinate) {
+	for y := int8(7); y > -1; y-- { // print highest indeces first since we draw top-down
+		for x := int8(0); x < 8; x++ {
+			if slices.ContainsFunc(selected, func(coord Coordinate) bool { return coord == Coordinate{y, x} }) { // color selected fields red
+				fmt.Print(colorSelected)
+			} else if slices.ContainsFunc(highlighted, func(coord Coordinate) bool { return coord == Coordinate{y, x} }) { // color highlighted fields yellow
+				fmt.Print(colorYellow)
+			} else {
+				fmt.Print(colorNormal)
 			}
-			if state.pieces[i][j].isWhite {
-				switch state.pieces[i][j].pieceType {
-				case None:
-					if (i+j)%2 == 0 {
-						fmt.Print("■")
+			if state.gameboard[y][x].isWhite {
+				switch state.gameboard[y][x].pieceType {
+				case None: // draw checkerboard
+					if (y+x)%2 == 0 {
+						fmt.Print("▒")
 					} else {
-						fmt.Print("□")
+						fmt.Print("█")
 					}
 				case Pawn:
 					fmt.Print("♙")
@@ -60,9 +68,9 @@ func printBoard(state *gameState) {
 					fmt.Print("♔")
 				}
 			} else {
-				switch state.pieces[i][j].pieceType {
+				switch state.gameboard[y][x].pieceType {
 				case None:
-					if (i+j)%2 == 0 {
+					if (y+x)%2 == 0 {
 						fmt.Print("▒")
 					} else {
 						fmt.Print("█")
@@ -81,29 +89,40 @@ func printBoard(state *gameState) {
 					fmt.Print("♚")
 				}
 			}
+			fmt.Print(colorNormal + " ")
 		}
 		fmt.Print("\n")
 	}
 }
 
+func (state *gameState) copyWithMove(move AbsoluteMove) (newState *gameState) {
+	newState = getDefaultBoard()
+	newState.moves = state.moves
+	newState.gameboard = state.gameboard
+	newState.gameboard[move.end.y][move.end.x] = newState.gameboard[move.start.y][move.start.x]
+	newState.gameboard[move.start.y][move.start.x] = Field{None, true}
+	newState.moves = append(newState.moves, move)
+	return newState
+}
+
 // if not mate, relative difference of white material and black material (between -1-1)
-func evaluateState(state *gameState) float32 {
+func (state *gameState) evaluateState() float32 {
 	whitePoints := float32(0)
 	blackPoints := float32(0)
-	for y := range state.pieces {
-		for x := range state.pieces[y] {
-			switch state.pieces[y][x].pieceType {
+	for y := range state.gameboard {
+		for x := range state.gameboard[y] {
+			switch state.gameboard[y][x].pieceType {
 			case None:
 				continue
 			case King:
-				if isInCheck(state, Coordinate{int8(y), int8(x)}) {
+				if state.isInCheck(Coordinate{int8(y), int8(x)}) {
 					return -1
 				}
 			default:
-				if state.pieces[y][x].isWhite {
-					whitePoints += getValue(state.pieces[y][x].pieceType)
+				if state.gameboard[y][x].isWhite {
+					whitePoints += getValue(state.gameboard[y][x].pieceType)
 				} else {
-					blackPoints += getValue(state.pieces[y][x].pieceType)
+					blackPoints += getValue(state.gameboard[y][x].pieceType)
 				}
 			}
 		}
@@ -111,26 +130,30 @@ func evaluateState(state *gameState) float32 {
 	return clamp((whitePoints-blackPoints)*0.5, -.99, .99)
 }
 
-func move(state *gameState, move AbsoluteMove) bool {
-	if !isAllowedMove(state, move, false) {
-		// this shouldn't happen so I throw before the problem gets worse
-		panic("Move was not allowed")
+func (state *gameState) attemptMove(move AbsoluteMove, player bool) bool {
+	if !state.isLegalMove(move, player) {
+		return false
 	}
-	state.pieces[move.end.y][move.end.x] = state.pieces[move.start.y][move.start.x]
-	state.pieces[move.start.y][move.start.x] = Field{None, true}
+	state.gameboard[move.end.y][move.end.x] = state.gameboard[move.start.y][move.start.x]
+	state.gameboard[move.start.y][move.start.x] = Field{None, true}
+	state.moves = append(state.moves, move)
 	return true
 }
 
 // checks if the direct line between two points is clear
-func isBlockedMove(state *gameState, move AbsoluteMove) bool {
+func (state *gameState) isBlockedMove(move AbsoluteMove) bool {
 	pointsBetween := getPointsAlongMove(move)
 	for i := range *pointsBetween {
 		point := (*pointsBetween)[i]
-		if state.pieces[point.y][point.x].pieceType != None {
+		if state.gameboard[point.y][point.x].pieceType != None {
 			return true
 		}
 	}
 	return false
+}
+
+func (state *gameState) isMine(coord Coordinate, color bool) bool {
+	return state.gameboard[coord.y][coord.x].isWhite == color
 }
 
 // checks:
@@ -139,9 +162,9 @@ func isBlockedMove(state *gameState, move AbsoluteMove) bool {
 // whether the destination isn't filled by a friendly piece or king
 // whether a move is within bounds (coordinates within the 8x8 board)
 // whether this move results in a check
-func isAllowedMove(state *gameState, move AbsoluteMove, allowKingHits bool) bool {
-	start := state.pieces[move.start.y][move.start.x]
-	end := state.pieces[move.end.y][move.end.x]
+func (state *gameState) isLegalMove(move AbsoluteMove, allowKingHits bool) bool {
+	start := state.gameboard[move.start.y][move.start.x]
+	end := state.gameboard[move.end.y][move.end.x]
 	if end.pieceType == King && !allowKingHits {
 		return false // cannot kill kings
 	} else if end.pieceType != None && start.isWhite == end.isWhite {
@@ -149,85 +172,125 @@ func isAllowedMove(state *gameState, move AbsoluteMove, allowKingHits bool) bool
 	} else if start.pieceType == None {
 		return false // nonexistant piece cannot move
 	}
-	if start.pieceType != Knight && isBlockedMove(state, move) {
+	if start.pieceType != Pawn && start.pieceType != Knight && state.isBlockedMove(move) { // skip for pawns since they get a special case check
 		return false
 	}
-	allowedEndCoords := filterOnBoardMoves(getMoves((*state).pieces[move.start.y][move.start.x].pieceType, move.start, (*state).pieces[move.start.y][move.start.x].isWhite))
-	isAllowedStep := false
-	for i := range allowedEndCoords {
-		fmt.Println("Coord: ", allowedEndCoords[i])
-		if allowedEndCoords[i] == move.end {
-			isAllowedStep = true
+	if start.pieceType != Pawn {
+		allowedEndCoords := filterOnBoardMoves(getMoves((*state).gameboard[move.start.y][move.start.x].pieceType, move.start, (*state).gameboard[move.start.y][move.start.x].isWhite))
+		isAllowedStep := false
+		for i := range allowedEndCoords {
+			if allowedEndCoords[i] == move.end {
+				isAllowedStep = true
+			}
+		}
+		if !isAllowedStep {
+			return false
+		}
+	} else { // handle pawn movement
+		if !isValidPawnMove(state, move) {
+			return false
 		}
 	}
-	if !isAllowedStep {
-		return false
-	}
+	// straight ahead moves, x=0,y=1|2
+	// diagonal moves, absx=1,absy=1
+	// en passant moves, absx=1,y=1
+	// if absXDiff == 0 && // if absolute x diff is null AND absolute y diff
 	// if this move puts you in check, NOT allowed
 	for i := range int8(8) {
 		for j := range int8(8) {
-			if state.pieces[j][i].pieceType == King && state.pieces[j][i].isWhite == start.isWhite {
-				return !isInCheck(state, Coordinate{y: j, x: i})
+			if state.gameboard[j][i].pieceType == King && state.gameboard[j][i].isWhite == start.isWhite {
+				afterMoveState := state.copyWithMove(move)
+				// panic("6")
+				return !afterMoveState.isInCheck(Coordinate{y: j, x: i})
 			}
 		}
 	}
 	panic("No king found on the board")
 }
 
+func isValidPawnMove(state *gameState, move AbsoluteMove) bool {
+	yDiff := move.end.y - move.start.y
+	absXDiff := math.Abs(float64(move.end.x - move.start.x))
+	absYDiff := math.Abs(float64(move.end.y - move.start.y))
+	startPiece := state.gameboard[move.start.y][move.start.x]
+	endPiece := state.gameboard[move.end.y][move.end.x]
+	if (startPiece.isWhite && yDiff < 0) || (!startPiece.isWhite && yDiff > 0) {
+		// if moving backwards, return false
+		return false
+	} else if absYDiff == 1 && absXDiff == 1 {
+		// handle diagonal hits
+		return endPiece.pieceType != None && endPiece.isWhite != startPiece.isWhite
+	} else if absXDiff == 1 && absYDiff == 1 && endPiece.pieceType == None {
+		// handle forward moves
+		return true
+	} else if absXDiff == 0 && absYDiff == 1 && endPiece.pieceType == None {
+		return true
+	} else if absXDiff == 0 && absYDiff == 2 && endPiece.pieceType == None {
+		// handle double step forward moves
+		midCoordY := (move.start.y + move.end.y) / 2
+		// check if not hopping over something
+		return state.gameboard[midCoordY][move.start.x].pieceType == None && endPiece.pieceType == None &&
+			// if trying to do a beginning jump when already moved, return false
+			((startPiece.isWhite && move.start.y == 1) || (!startPiece.isWhite && move.start.y == 6))
+	} else {
+		return false
+	}
+}
+
 // gets all the points along the line between two points
 // this only works for straight and diagonal lines, which is good enough
 func getPointsAlongMove(move AbsoluteMove) (coords *[]Coordinate) {
 	coords = &[]Coordinate{}
-	sX, sY := int8(1), int8(1)
+	sY, sX := int8(1), int8(1)
 	if move.start.y > move.end.y {
-		sX = int8(-1)
+		sY = int8(-1)
 	} else if move.start.y == move.end.y {
-		sX = int8(0)
+		sY = int8(0)
 	}
 	if move.start.x > move.end.x {
-		sY = int8(-1)
+		sX = int8(-1)
 	} else if move.start.x == move.end.x {
-		sY = int8(0)
+		sX = int8(0)
 	}
 
 	current := move.start
 	for {
+		current.y += sY
+		current.x += sX
 		if current == move.end {
 			return coords
 		}
-		current.y += sX
-		current.x += sY
 		*coords = append(*coords, current)
 	}
 }
 
-func isInCheck(state *gameState, kingPos Coordinate) bool {
-	king := state.pieces[kingPos.y][kingPos.x]
+func (state *gameState) isInCheck(kingPos Coordinate) bool {
+	king := state.gameboard[kingPos.y][kingPos.x]
 	if king.pieceType != King {
 		panic("Tried to check for mate with invalid piece")
 	}
 	moves := filterOnBoardMoves(append(append(getDiagonals(kingPos), getHorseSteps(kingPos)...), getLines(kingPos)...))
 	for i := range moves {
-		if isAllowedMove(state, AbsoluteMove{moves[i], kingPos}, true) {
+		if state.isLegalMove(AbsoluteMove{moves[i], kingPos}, true) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasAllowedMoves(state *gameState, isWhite bool) bool {
+func (state *gameState) hasAllowedMoves(isWhite bool) bool {
 	pieces := []Coordinate{}
 	for i := range int8(8) {
 		for j := range int8(8) {
-			if state.pieces[j][i].pieceType != None && (state.pieces[j][i]).isWhite == isWhite {
+			if state.gameboard[j][i].pieceType != None && (state.gameboard[j][i]).isWhite == isWhite {
 				pieces = append(pieces, Coordinate{i, j})
 			}
 		}
 	}
 	for i := range pieces {
-		pieceMoves := getMoves(state.pieces[pieces[i].y][pieces[i].x].pieceType, pieces[i], isWhite)
+		pieceMoves := filterOnBoardMoves(getMoves(state.gameboard[pieces[i].y][pieces[i].x].pieceType, pieces[i], isWhite))
 		for j := range pieceMoves {
-			if isAllowedMove(state, AbsoluteMove{pieces[i], pieceMoves[j]}, false) {
+			if state.isLegalMove(AbsoluteMove{pieces[i], pieceMoves[j]}, false) {
 				return true
 			}
 		}

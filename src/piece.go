@@ -38,6 +38,10 @@ type Coordinate struct {
 	x int8
 }
 
+func (state *gameState) showInfo(coord Coordinate) string {
+	return fmt.Sprintf("{\n\tX: %d, \n\tY: %d\n\tType: %d\n\tOwner: %t\n}\n", coord.x, coord.y, state.gameboard[coord.y][coord.x].pieceType, state.gameboard[coord.y][coord.x].isWhite)
+}
+
 func filterOnBoardMoves(moves []Coordinate) (ret []Coordinate) {
 	for i := range moves {
 		if isOnBoard(moves[i]) {
@@ -49,6 +53,8 @@ func filterOnBoardMoves(moves []Coordinate) (ret []Coordinate) {
 
 func getMoves(piece PieceType, start Coordinate, isWhite bool) []Coordinate {
 	switch piece {
+	case None:
+		return []Coordinate{}
 	case Knight:
 		return getHorseSteps(start)
 	case Pawn:
@@ -84,11 +90,11 @@ func getMoves(piece PieceType, start Coordinate, isWhite bool) []Coordinate {
 			}
 		}
 	case Bishop:
-		return getDiagonals(Coordinate{0, 0})
+		return getDiagonals(start)
 	case Rook:
 		return getLines(start)
 	case Queen:
-		return append(getDiagonals(Coordinate{0, 0}), getLines(start)...)
+		return append(getDiagonals(start), getLines(start)...)
 	case King:
 		return []Coordinate{{1, 1}, {1, 0}, {1, -1}, {0, 1}, {0, -1}, {-1, 1}, {-1, 0}, {-1, -1}}
 	}
