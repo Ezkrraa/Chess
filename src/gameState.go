@@ -36,7 +36,17 @@ func getDefaultBoard() *gameState {
 	}
 }
 
-func printBoard(state *gameState, selected []Coordinate, highlighted []Coordinate) {
+func (state *gameState) printInfo() {
+	whitePts, blackPts := state.getPoints()
+	if len(state.moves)%2 == 0 {
+		fmt.Println("White's turn")
+	} else {
+		fmt.Println("Black's turn")
+	}
+	fmt.Printf("Black has %d points\nWhite has %d points\n", blackPts, whitePts)
+}
+
+func (state *gameState) printBoard(selected []Coordinate, highlighted []Coordinate) {
 	for y := int8(7); y > -1; y-- { // print highest indeces first since we draw top-down
 		for x := int8(0); x < 8; x++ {
 			if slices.ContainsFunc(selected, func(coord Coordinate) bool { return coord == Coordinate{y, x} }) { // color selected fields red
@@ -105,6 +115,22 @@ func (state *gameState) copyWithMove(move AbsoluteMove) (newState *gameState) {
 	return newState
 }
 
+func (state *gameState) getPoints() (int, int) {
+	whitePoints, blackPoints := 0, 0
+	for y := int8(0); y < 8; y++ {
+		for x := int8(0); x < 8; x++ {
+			if state.gameboard[y][x].pieceType != None {
+				if state.gameboard[y][x].isWhite {
+					whitePoints += int(getValue(state.gameboard[y][x].pieceType))
+				} else {
+					blackPoints += int(getValue(state.gameboard[y][x].pieceType))
+				}
+			}
+		}
+	}
+	return whitePoints, blackPoints
+}
+
 // if not mate, relative difference of white material and black material (between -1-1)
 func (state *gameState) evaluateState() float32 {
 	whitePoints := float32(0)
@@ -116,7 +142,11 @@ func (state *gameState) evaluateState() float32 {
 				continue
 			case King:
 				if state.isInCheck(Coordinate{int8(y), int8(x)}) {
-					return -1
+					if state.gameboard[y][x].isWhite {
+						return 2
+					} else {
+						return -2
+					}
 				}
 			default:
 				if state.gameboard[y][x].isWhite {
@@ -127,7 +157,7 @@ func (state *gameState) evaluateState() float32 {
 			}
 		}
 	}
-	return clamp((whitePoints-blackPoints)*0.5, -.99, .99)
+	return clamp((whitePoints-blackPoints)*0.5, -1, 1)
 }
 
 func (state *gameState) attemptMove(move AbsoluteMove, player bool) bool {
@@ -191,10 +221,6 @@ func (state *gameState) isLegalMove(move AbsoluteMove, allowKingHits bool) bool 
 			return false
 		}
 	}
-	// straight ahead moves, x=0,y=1|2
-	// diagonal moves, absx=1,absy=1
-	// en passant moves, absx=1,y=1
-	// if absXDiff == 0 && // if absolute x diff is null AND absolute y diff
 	// if this move puts you in check, NOT allowed
 	for i := range int8(8) {
 		for j := range int8(8) {
@@ -214,16 +240,15 @@ func isValidPawnMove(state *gameState, move AbsoluteMove) bool {
 	absYDiff := math.Abs(float64(move.end.y - move.start.y))
 	startPiece := state.gameboard[move.start.y][move.start.x]
 	endPiece := state.gameboard[move.end.y][move.end.x]
+
 	if (startPiece.isWhite && yDiff < 0) || (!startPiece.isWhite && yDiff > 0) {
 		// if moving backwards, return false
 		return false
 	} else if absYDiff == 1 && absXDiff == 1 {
 		// handle diagonal hits
 		return endPiece.pieceType != None && endPiece.isWhite != startPiece.isWhite
-	} else if absXDiff == 1 && absYDiff == 1 && endPiece.pieceType == None {
-		// handle forward moves
-		return true
 	} else if absXDiff == 0 && absYDiff == 1 && endPiece.pieceType == None {
+		// handle single forward step
 		return true
 	} else if absXDiff == 0 && absYDiff == 2 && endPiece.pieceType == None {
 		// handle double step forward moves

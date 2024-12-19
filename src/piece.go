@@ -106,7 +106,7 @@ func getHorseSteps(start Coordinate) []Coordinate {
 		{start.y + 2, start.x + 1},
 		{start.y + 2, start.x - 1},
 		{start.y - 2, start.x + 1},
-		{start.y - 2, start.x - 2},
+		{start.y - 2, start.x - 1},
 		{start.y + 1, start.x + 2},
 		{start.y - 1, start.x + 2},
 		{start.y + 1, start.x - 2},

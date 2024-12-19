@@ -17,7 +17,10 @@ func main() {
 		return
 	}
 	// TODO: build main menu with either local multiplayer or CPU (TODO: build CPU first)
+
 	gameLoop()
+	clearTerminal()
+	fmt.Println("Stopping...")
 }
 
 func gameLoop() {
@@ -27,35 +30,43 @@ func gameLoop() {
 		if !state.hasAllowedMoves(currentPlayer) {
 			break
 		}
-		startMoveCoordinate := selectToMove(state, currentPlayer)
-		if startMoveCoordinate.x == -1 {
-			fmt.Println("Stopping...")
+
+		startMoveCoordinate, result1 := selectToMove(state, currentPlayer)
+		if result1 == quit {
 			return
 		}
-		madeMove := selectDestination(state, currentPlayer, startMoveCoordinate)
-		if !madeMove {
-			fmt.Println("Stopping...")
-			return
+		for {
+			result2 := selectDestination(state, currentPlayer, startMoveCoordinate)
+			if result2 == quit {
+				return
+			} else if result2 == undo {
+				startMoveCoordinate, result1 = selectToMove(state, currentPlayer)
+				if result1 == quit {
+					return
+				}
+			} else {
+				break
+			}
 		}
+
 		currentPlayer = !currentPlayer
 	}
 	fmt.Println(" won!")
+	termbox.PollEvent()
 }
 
-func selectDestination(state *gameState, currentPlayer bool, startCoord Coordinate) bool {
+func selectDestination(state *gameState, currentPlayer bool, startCoord Coordinate) uiResult {
 	selectedCoord := startCoord
 	for {
 		clearTerminal()
-		if len(state.moves)%2 == 0 {
-			fmt.Println("White's turn")
-		} else {
-			fmt.Println("Black's turn")
-		}
-		printBoard(state, []Coordinate{selectedCoord}, filterOnBoardMoves(getMoves(state.gameboard[startCoord.y][startCoord.x].pieceType, startCoord, currentPlayer)))
+		state.printInfo()
+		state.printBoard([]Coordinate{selectedCoord}, filterOnBoardMoves(getMoves(state.gameboard[startCoord.y][startCoord.x].pieceType, startCoord, currentPlayer)))
 		a := termbox.PollEvent().Key
 		switch a {
 		case termbox.KeyEsc:
-			return false
+			return quit
+		case termbox.KeyBackspace:
+			return undo
 		case termbox.KeyArrowUp:
 			selectedCoord.y += 1
 		case termbox.KeyArrowDown:
@@ -66,7 +77,7 @@ func selectDestination(state *gameState, currentPlayer bool, startCoord Coordina
 			selectedCoord.x -= 1
 		case termbox.KeyEnter:
 			if state.attemptMove(AbsoluteMove{startCoord, selectedCoord}, currentPlayer) {
-				return true
+				return success
 			}
 		}
 		selectedCoord = clampCoord(selectedCoord)
@@ -74,22 +85,16 @@ func selectDestination(state *gameState, currentPlayer bool, startCoord Coordina
 }
 
 // return a position of a piece to move
-func selectToMove(state *gameState, currentPlayer bool) Coordinate {
+func selectToMove(state *gameState, currentPlayer bool) (Coordinate, uiResult) {
 	selectedCoord := Coordinate{0, 0}
 	for {
 		clearTerminal()
-		if len(state.moves)%2 == 0 {
-			fmt.Println("White's turn")
-		} else {
-			fmt.Println("Black's turn")
-		}
-		// fmt.Printf("Selected: \n%s\n", state.showInfo(selectedCoord))
-		// fmt.Printf("IsMine: %t\n", state.isMine(selectedCoord, currentPlayer))
-		printBoard(state, []Coordinate{selectedCoord}, []Coordinate{})
+		state.printInfo()
+		state.printBoard([]Coordinate{selectedCoord}, []Coordinate{})
 		a := termbox.PollEvent().Key
 		switch a {
 		case termbox.KeyEsc:
-			return Coordinate{-1, -1}
+			return Coordinate{-1, -1}, quit
 		case termbox.KeyArrowUp:
 			selectedCoord.y += 1
 		case termbox.KeyArrowDown:
@@ -100,10 +105,7 @@ func selectToMove(state *gameState, currentPlayer bool) Coordinate {
 			selectedCoord.x -= 1
 		case termbox.KeyEnter:
 			if state.isMine(selectedCoord, currentPlayer) {
-				return selectedCoord
-			} else {
-				state.showInfo(selectedCoord)
-				// panic(state.gameboard[selectedCoord.y][selectedCoord.x].isWhite)
+				return selectedCoord, success
 			}
 		}
 		selectedCoord = clampCoord(selectedCoord)
